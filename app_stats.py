@@ -1,8 +1,10 @@
 import streamlit as st
 import pandas as pd
 import json
+from datetime import datetime
+import os
 
-st.set_page_config(page_title="BSキャラ勝率", layout="wide")
+st.set_page_config(page_title="シンプルガチバ統計", layout="wide")
 
 MODE_JA = {
     "gemGrab": "エメラルドハント",
@@ -59,7 +61,6 @@ RANK_JA = {
 
 RANK_NAMES = [RANK_JA[k] for k in sorted(RANK_JA.keys())]
 RANK_EN = {v: k for k, v in RANK_JA.items()}
-
 MODE_EN = {v: k for k, v in MODE_JA.items()}
 MAP_EN = {v: k for k, v in MAP_JA.items()}
 
@@ -93,17 +94,33 @@ def get_mode_map_dict(df):
             result[m_ja].append(p_ja)
     return result
 
-# --- メイン ---
-st.title("🎮 Brawl Stars キャラ勝率ランキング")
+def get_last_updated():
+    try:
+        mtime = os.path.getmtime("stats.csv")
+        return datetime.fromtimestamp(mtime).strftime("%Y/%m/%d %H:%M")
+    except:
+        return "不明"
 
+# --- メイン ---
 df = load_data()
 brawler_map = load_brawler_map()
 mode_map_dict = get_mode_map_dict(df)
 
+# 全データ数・最終更新
+total_all = df["total"].sum() // 6
+last_updated = get_last_updated()
+
+# タイトル + 全データ情報
+col_title, col_info = st.columns([3, 1])
+with col_title:
+    st.title("🎮 シンプルガチバ統計")
+with col_info:
+    st.metric("全データ数", f"{total_all:,} 試合")
+    st.caption(f"最終更新：{last_updated}")
+
 with st.sidebar:
     st.header("🔧 設定")
 
-    # ランク帯選択
     st.markdown("**ランク帯**")
     rank_min_ja = st.selectbox("下限", RANK_NAMES, index=0)
     rank_min_idx = RANK_NAMES.index(rank_min_ja)
@@ -114,14 +131,13 @@ with st.sidebar:
 
     mode_ja = st.selectbox("ゲームモード", sorted(mode_map_dict.keys()))
     map_ja = st.selectbox("マップ", mode_map_dict[mode_ja])
-    min_games = st.number_input("最低試合数", value=10, step=5, min_value=1)
-    sort_by = st.radio("ソート順", ["勝率", "使用率", "試合数"])
+    min_games = st.number_input("最低試合数", value=10, step=5, min_value=0)
+    sort_by = st.radio("ソート順", ["勝率", "使用率"])
 
 if st.button("🔍 ランキングを見る", type="primary"):
     mode_en = MODE_EN[mode_ja]
     map_en = MAP_EN[map_ja]
 
-    # フィルタリング
     filtered = df[
         (df["mode"] == mode_en) &
         (df["map"] == map_en) &
@@ -129,26 +145,33 @@ if st.button("🔍 ランキングを見る", type="primary"):
         (df["rank"] <= rank_max)
     ]
 
-    # ランク範囲で集計
     aggregated = filtered.groupby("brawler").agg(
         wins=("wins", "sum"),
         total=("total", "sum")
     ).reset_index()
 
-    # 使用率を再計算
     total_appearances = aggregated["total"].sum()
+    match_count = total_appearances // 6
+
     aggregated["勝率"] = (aggregated["wins"] / aggregated["total"] * 100).round(1)
     aggregated["使用率"] = (aggregated["total"] / total_appearances * 100).round(1)
     aggregated["試合数"] = aggregated["total"]
 
-    # 最低試合数フィルター
     aggregated = aggregated[aggregated["試合数"] >= min_games]
 
     if aggregated.empty:
         st.warning("該当するデータが見つかりませんでした。条件を緩めてみてください。")
     else:
-        sort_col = sort_by
-        aggregated = aggregated.sort_values(sort_col, ascending=False).reset_index(drop=True)
+        # モード・マップ・データ数を表示
+        col_mode, col_map, col_count = st.columns([1, 1, 1])
+        with col_mode:
+            st.metric("モード", mode_ja)
+        with col_map:
+            st.metric("マップ", map_ja)
+        with col_count:
+            st.metric("データ数", f"{match_count:,} 試合")
+
+        aggregated = aggregated.sort_values(sort_by, ascending=False).reset_index(drop=True)
         st.success(f"{len(aggregated)} 体のキャラがランクインしました")
 
         cols_per_row = 10
